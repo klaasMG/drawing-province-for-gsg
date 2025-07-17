@@ -1,17 +1,21 @@
-from PIL import Image , ImageDraw , ImageOps
+from PIL import Image , ImageDraw
 from PyQt5.QtWidgets import (QApplication , QMainWindow , QFileDialog , QGraphicsView , QGraphicsScene ,
     QGraphicsPixmapItem , QWidget , QVBoxLayout , QHBoxLayout , QAbstractItemView , QListWidget , QPushButton)
 from PyQt5.QtCore import Qt , QObject , QThread, pyqtSignal
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QPainter, QPen, QColor
 import numpy as np
 import sys
 import queue
+import os
 
+Image.MAX_IMAGE_PIXELS = None
 draw_to_compute_thread = queue.Queue()
 compute_to_image_render_thread = queue.Queue()
+province_id = 1
+province_id_max = 1
 
 def extract_rgb_divmod(color_24bit):
-    #getting a rgb valeus from the id
+    #getting a rgb values from the id
     blue = color_24bit % 256
     color_24bit //= 256
     green = color_24bit % 256
@@ -75,17 +79,34 @@ class MyDrawWindow(QGraphicsView):
         zoom_factor = zoom_in_factor if delta > 0 else zoom_out_factor
         self.scale(zoom_factor , zoom_factor)
     
-    def on_worker_finished(self , data):
-        print("[MyDrawWindow] Worker finished:" , data)
+    def on_worker_finished(self , return_data):
+        tool, data = return_data
+        points, colour = data
+        if isinstance(colour,tuple):
+            red, green, blue = colour
+        else:
+            red, green, blue = 1,1,1
+        painter = QPainter(self.drawing_pixmap)
+        painter.setPen(QPen(QColor(red,green,blue),1))
+        if tool == "free hand":
+            point1 , point2 = points
+            point1_x, point1_y = point1
+            painter.drawPoint(point1_x, point1_y)
+            if point2 is not None:
+                point2_x, point2_y = point2
+                painter.drawLine(point1_x,point1_y,point2_x,point2_y)
+            self.drawing_item.setPixmap(self.drawing_pixmap)
     
     def mousePressEvent(self , event):
         if event.button() == Qt.LeftButton:
             self.using_tool = True
             self.point_pressed = self.mapToScene(event.pos())
             self.points_send.append(self.point_pressed)
-            if len(self.points_send) > 1:
+            if len(self.points_send) > 2:
                 self.points_send.pop(0)
-            draw_to_compute_thread.put((self.tool , (self.points_send, 1)))
+            print(self.point_pressed,self.points_send)
+            global province_id
+            draw_to_compute_thread.put((self.tool , (self.points_send, province_id)))
     
     def mouseMoveEvent(self , event):
         if self.using_tool:
@@ -93,7 +114,9 @@ class MyDrawWindow(QGraphicsView):
             self.points_send.append(self.point_pressed)
             if len(self.points_send) > 2:
                 self.points_send.pop(0)
-            draw_to_compute_thread.put((self.tool ,(self.points_send, 1)))
+            print(self.point_pressed , self.points_send)
+            global province_id
+            draw_to_compute_thread.put((self.tool ,(self.points_send, province_id)))
     
     def mouseReleaseEvent(self , event):
         if event.button() == Qt.LeftButton:
@@ -109,21 +132,33 @@ class ProvinceSettings(QWidget):
         self.setFixedWidth(size)
         layout = QVBoxLayout(self)
         self.new_province = QPushButton("new province")
+        self.new_province.clicked.connect(self.increase_prov_id)
         self.save_button = QPushButton("save")
         self.list_widget = QListWidget()
+        self.list_widget.currentItemChanged.connect(self.set_province_id)
         self.list_widget.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.item = ["province:1"]
+        self.item = ["province : 1"]
         self.list_widget.addItems(self.item)
         layout.addWidget(self.new_province)
         layout.addWidget(self.list_widget)
         layout.addWidget(self.save_button)
-
+    def increase_prov_id(self):
+        global province_id, province_id_max
+        province_id_max += 1
+        province_id = province_id_max
+        self.list_widget.addItem(f"province : {province_id_max}")
+    def set_province_id(self):
+        global province_id
+        prov_id_to = self.list_widget.currentItem().text()
+        prov_id_to = prov_id_to.split(":")[1].strip()
+        province_id = int(prov_id_to)
 
 class ComputeThread(QObject):
     compute_to_draw_thread = pyqtSignal(tuple)
     def __init__(self):
         super().__init__()
         self.compute_image = np.array([],dtype=np.uint32)
+        self.last_pid = 1
     def run(self):
         while True:
             try:
@@ -141,6 +176,8 @@ class ComputeThread(QObject):
                         point2 = None
                         pid = None
                     tool,data = self.free_hand(tool , point1 , point2 , pid)
+                    self.last_pid = pid
+                    print(self.last_pid, pid,"23")
                 elif tool == "queue init":
                     size_aray_x , size_aray_y= data
                     self.compute_image = np.zeros((size_aray_y, size_aray_x), dtype=np.uint32)
@@ -159,24 +196,21 @@ class ComputeThread(QObject):
             point1_y = int(point1.y())
         
             self.compute_image[point1_y,point1_x] = pid
-            if point2 is not None:
+            print(self.last_pid, pid)
+            if point2 is not None and self.last_pid == pid:
                 point2_x = int(point2.x())
                 point2_y = int(point2.y())
-                
-                
+                self.bresenham_octant0(point2_y, point2_x, point1_y, point1_x, pid)
+                point2 = (point2_x , point2_y)
+            point1 = (point1_x, point1_y)
         else:
             red, green, blue = None, None, None
-        return tool , (point1 , point2 , (red, green, blue))
+        return tool , ((point1 , point2), (red, green, blue))
     
     def bresenham_octant0(self, dy , dx ,offset_y ,offset_x ,pid):
-        """
-        Returns list of (x, y) points for a line starting at (0, 0)
-        ending at (dx, dy) where dx >= dy >= 0 (octant 0).
-        """
         dy = dy - offset_y
         dx = dx - offset_x
         octant = self.octant_for_transform(dy, dx)
-        points = []
         if octant == "failed to get one" or isinstance(octant,str):
             dy = abs(dy)
             dx = abs(dx)
@@ -194,7 +228,7 @@ class ComputeThread(QObject):
                     y += 1
                     D -= 2 * dx
                 D += 2 * dy
-        return points
+                
     def octant_for_transform(self, dy, dx):
         octant = "failed to get one"
         if dx > 0 and dy > 0:
@@ -237,11 +271,34 @@ class ComputeThread(QObject):
             y, x = -y, x
         return y, x
 
-app = QApplication(sys.argv)
-map_path = QFileDialog.getOpenFileName(None , "Select Map Image" , "" , "Images (*.png *.jpg *.bmp)")[0]
-if map_path:
-    window = MainWindow(map_path)
-    window.show()
-    sys.exit(app.exec_())
-else:
-    print("[main] No file selected. Exiting.")
+class Image_draw_thread(QObject):
+    def __init__(self):
+        super().__init__()
+    def run(self):
+        while True:
+            tool, data = compute_to_image_render_thread.get()
+            if tool == "free hand":
+                points, colour = data
+                point1, point2 = points
+                red, green, bleu = colour
+                self.draw_image = Image.open("map_image.png")
+                self.draw_image.putpixel(point1,(red, green, bleu))
+                if point2 is not None:
+                    draw = ImageDraw.Draw(self.draw_image)
+                    draw.line((point1[0], point1[1], point2[0], point2[1]),fill=(red, green, bleu), width=1)
+            
+            
+
+try:
+    app = QApplication(sys.argv)
+    map_path = QFileDialog.getOpenFileName(None , "Select Map Image" , "" , "Images (*.png *.jpg *.bmp)")[0]
+    if map_path:
+        window = MainWindow(map_path)
+        window.show()
+        sys.exit(app.exec_())
+    else:
+        print("[main] No file selected. Exiting.")
+except Exception as e:
+    import traceback
+    print("Exception during startup:", e)
+    traceback.print_exc()
