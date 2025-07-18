@@ -7,6 +7,7 @@ import numpy as np
 import sys
 import queue
 import os
+import threading
 
 Image.MAX_IMAGE_PIXELS = None
 draw_to_compute_thread = queue.Queue()
@@ -71,6 +72,9 @@ class MyDrawWindow(QGraphicsView):
         self.worker.compute_to_draw_thread.connect(self.on_worker_finished)# start werk als thread start
         
         self.thread.start()
+        self.worker1 = Image_draw_thread()
+        threading.Thread(target=self.worker1.run , daemon=True).start()
+        
     
     def wheelEvent(self , event):
         zoom_in_factor = 1.25
@@ -81,7 +85,11 @@ class MyDrawWindow(QGraphicsView):
     
     def on_worker_finished(self , return_data):
         tool, data = return_data
-        points, colour = data
+        if data is not None:
+            points, colour = data
+        else:
+            colour = (1, 1, 1)
+            points = ((1,1),(1,1))
         if isinstance(colour,tuple):
             red, green, blue = colour
         else:
@@ -134,6 +142,7 @@ class ProvinceSettings(QWidget):
         self.new_province = QPushButton("new province")
         self.new_province.clicked.connect(self.increase_prov_id)
         self.save_button = QPushButton("save")
+        self.save_button.clicked.connect(self.send_save)
         self.list_widget = QListWidget()
         self.list_widget.currentItemChanged.connect(self.set_province_id)
         self.list_widget.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -152,6 +161,8 @@ class ProvinceSettings(QWidget):
         prov_id_to = self.list_widget.currentItem().text()
         prov_id_to = prov_id_to.split(":")[1].strip()
         province_id = int(prov_id_to)
+    def send_save(self):
+        draw_to_compute_thread.put(("save","data not needed"))
 
 class ComputeThread(QObject):
     compute_to_draw_thread = pyqtSignal(tuple)
@@ -181,6 +192,8 @@ class ComputeThread(QObject):
                 elif tool == "queue init":
                     size_aray_x , size_aray_y= data
                     self.compute_image = np.zeros((size_aray_y, size_aray_x), dtype=np.uint32)
+                elif tool == "save":
+                    data = None
                 compute_to_image_render_thread.put((tool , data))
                 self.compute_to_draw_thread.emit((tool,data))
             except queue.Empty:
@@ -197,11 +210,14 @@ class ComputeThread(QObject):
         
             self.compute_image[point1_y,point1_x] = pid
             print(self.last_pid, pid)
+            print(isinstance(self.last_pid, int),isinstance(pid,int))
             if point2 is not None and self.last_pid == pid:
                 point2_x = int(point2.x())
                 point2_y = int(point2.y())
                 self.bresenham_octant0(point2_y, point2_x, point1_y, point1_x, pid)
                 point2 = (point2_x , point2_y)
+            else:
+                point2 = None
             point1 = (point1_x, point1_y)
         else:
             red, green, blue = None, None, None
@@ -271,9 +287,9 @@ class ComputeThread(QObject):
             y, x = -y, x
         return y, x
 
-class Image_draw_thread(QObject):
+class Image_draw_thread():
     def __init__(self):
-        super().__init__()
+        self.draw_image = Image.new("RGBA" , (13500 , 6750) , (0 , 0 , 0 , 0))
     def run(self):
         while True:
             tool, data = compute_to_image_render_thread.get()
@@ -281,11 +297,12 @@ class Image_draw_thread(QObject):
                 points, colour = data
                 point1, point2 = points
                 red, green, bleu = colour
-                self.draw_image = Image.open("map_image.png")
                 self.draw_image.putpixel(point1,(red, green, bleu))
                 if point2 is not None:
                     draw = ImageDraw.Draw(self.draw_image)
                     draw.line((point1[0], point1[1], point2[0], point2[1]),fill=(red, green, bleu), width=1)
+            if tool == "save":
+                self.draw_image.save("map_image.png",format="png")
             
             
 
