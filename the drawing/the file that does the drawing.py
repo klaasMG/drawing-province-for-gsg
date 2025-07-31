@@ -10,8 +10,10 @@ import os
 import threading
 
 Image.MAX_IMAGE_PIXELS = None
-draw_to_compute_thread = queue.Queue()
-compute_to_image_render_thread = queue.Queue()
+draw_to_compute_thread = queue.Queue(maxsize=4096)
+compute_to_image_render_thread = queue.Queue(maxsize=4096)
+shutdown_queue = queue.Queue(maxsize=16)
+thread_finished_send = queue.Queue(maxsize=32)
 province_id = 1
 province_id_max = 1
 
@@ -38,6 +40,22 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.draw_widget)
         
         self.setCentralWidget(central)
+    
+    def closeEvent(self , event):
+        self.draw_widget.stop()
+        self.thread = QThread()
+        self.worker = Shutdown_Thread()
+        self.worker.moveToThread(self.thread)
+        
+        self.thread.started.connect(self.worker.run)
+        self.worker.threads_finished.connect(self.on_worker_finished)  # start werk als thread start
+        
+        self.thread.start()
+        event.ignore()
+    def on_worker_finished(self, shut_down_finished):
+        if shut_down_finished == "done":
+            self.thread.quit()
+            self.close()
 
 
 class MyDrawWindow(QGraphicsView):
@@ -132,7 +150,24 @@ class MyDrawWindow(QGraphicsView):
     
     def get_size(self):
         return self.width()
-
+    def stop(self):
+        pass
+class Shutdown_Thread(QObject):
+    threads_finished = pyqtSignal(str)
+    def __init__(self):
+        super().__init__()
+    def run(self):
+        shutdown_queue.put("shut down")
+        threads_shutdown = 0
+        while threads_shutdown < 2:
+            try:
+                message = thread_finished_send.get()
+                if message == "finished_thread":
+                    threads_shutdown += 1
+            except queue.Empty():
+                continue
+        self.threads_finished.emit("done")
+        
 
 class ProvinceSettings(QWidget):
     def __init__(self , size):
@@ -170,8 +205,9 @@ class ComputeThread(QObject):
         super().__init__()
         self.compute_image = np.array([],dtype=np.uint32)
         self.last_pid = 1
+        self.running = True
     def run(self):
-        while True:
+        while self.running:
             try:
                 tool , data = draw_to_compute_thread.get(timeout=0.1)
                 if tool == "free hand":
@@ -196,6 +232,15 @@ class ComputeThread(QObject):
                     data = None
                 compute_to_image_render_thread.put((tool , data))
                 self.compute_to_draw_thread.emit((tool,data))
+            except queue.Empty:
+                continue
+            try:
+                tool_lst = shutdown_queue.get()
+                tool = tool_lst[0]
+                if tool == "shut down":
+                    self.stop()
+                    thread_finished_send.put("finished_thread")
+                    print("send 1")
             except queue.Empty:
                 continue
     
@@ -286,23 +331,40 @@ class ComputeThread(QObject):
         elif octant == 7:
             y, x = -y, x
         return y, x
+    def stop(self):
+        self.running = False
 
 class Image_draw_thread():
     def __init__(self):
         self.draw_image = Image.new("RGBA" , (13500 , 6750) , (0 , 0 , 0 , 0))
+        self.running = True
     def run(self):
-        while True:
-            tool, data = compute_to_image_render_thread.get()
-            if tool == "free hand":
-                points, colour = data
-                point1, point2 = points
-                red, green, bleu = colour
-                self.draw_image.putpixel(point1,(red, green, bleu))
-                if point2 is not None:
-                    draw = ImageDraw.Draw(self.draw_image)
-                    draw.line((point1[0], point1[1], point2[0], point2[1]),fill=(red, green, bleu), width=1)
-            if tool == "save":
-                self.draw_image.save("map_image.png",format="png")
+        while self.running:
+            try:
+                tool, data = compute_to_image_render_thread.get()
+                if tool == "free hand":
+                    points, colour = data
+                    point1, point2 = points
+                    red, green, bleu = colour
+                    self.draw_image.putpixel(point1,(red, green, bleu))
+                    if point2 is not None:
+                        draw = ImageDraw.Draw(self.draw_image)
+                        draw.line((point1[0], point1[1], point2[0], point2[1]),fill=(red, green, bleu), width=1)
+                if tool == "save":
+                    self.draw_image.save("map_image.png",format="png")
+            except queue.Empty:
+                continue
+            try:
+                tool_lst = shutdown_queue.get()
+                tool = tool_lst[0]
+                if tool == "shut down":
+                    self.stop()
+                    thread_finished_send.put("finished_thread")
+                    print("send 2")
+            except queue.Empty:
+                continue
+    def stop(self):
+        self.running = False
             
             
 
