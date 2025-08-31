@@ -1,0 +1,6 @@
+this will be an explanation of how a safe file does safe in what data format
+the first four bytes are the identifier these will be the letters "MGSG" or in ascii "01001101 01000111 01010011  01000111"
+next we will go on to the version:
+this is just 2 bytes to an integer why to well because of the many versions there will be
+each new province has a declaration with a single byte looking like this 10101010
+then the province id in binary   
