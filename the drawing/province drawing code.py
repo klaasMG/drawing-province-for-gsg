@@ -36,12 +36,37 @@ class MainWindow(QMainWindow):
         self.draw_widget = MyDrawWindow(self.map_path)
         size = self.draw_widget.get_size()
         self.leftside = ProvinceSettings(size)
+        self.tool_select = ToolSelectWidget(size, self.draw_widget)
         layout = QHBoxLayout(central)
         layout.addWidget(self.leftside)
         layout.addWidget(self.draw_widget)
+        layout.addWidget(self.tool_select)
         
         self.setCentralWidget(central)
 
+class ToolSelectWidget(QWidget):
+    def __init__(self, size, parent):
+        super().__init__()
+        self.parent = parent
+        size = int(size / 2)
+        self.setFixedWidth(size)
+        h_tool_layout = QHBoxLayout()
+        v_tool_layout = QVBoxLayout()
+        self.line_draw_tool = QPushButton("free hand")
+        self.erase_tool = QPushButton("erase")
+        self.line_draw_tool.clicked.connect(self.set_tool)
+        self.erase_tool.clicked.connect(self.set_tool)
+        h_tool_layout.addWidget(self.line_draw_tool)
+        h_tool_layout.addWidget(self.erase_tool)
+        self.setLayout(h_tool_layout)
+    def set_tool(self):
+        btn = self.sender()
+        if isinstance(btn, QPushButton):
+            tool = btn.text()
+            print(tool)
+            self.parent.set_tool(tool)
+    
+    
 
 class MyDrawWindow(QGraphicsView):
     def __init__(self , map_path):
@@ -78,6 +103,9 @@ class MyDrawWindow(QGraphicsView):
         self.worker1 = Image_draw_thread()
         threading.Thread(target=self.worker1.run , daemon=True).start()
     
+    def set_tool(self, tool):
+        self.tool = tool
+    
     def wheelEvent(self , event):
         zoom_in_factor = 1.25
         zoom_out_factor = 1 / zoom_in_factor
@@ -107,30 +135,39 @@ class MyDrawWindow(QGraphicsView):
                 painter.drawLine(point1_x , point1_y , point2_x , point2_y)
             self.drawing_item.setPixmap(self.drawing_pixmap)
     
+    def point_pressed_to_send(self, event):
+        self.point_pressed = self.mapToScene(event.pos())
+        self.points_send.append(self.point_pressed)
+        if len(self.points_send) > 2:
+            self.points_send.pop(0)
+        print(self.point_pressed , self.points_send)
+    
     def mousePressEvent(self , event):
         if event.button() == Qt.LeftButton:
-            self.using_tool = True
-            self.point_pressed = self.mapToScene(event.pos())
-            self.points_send.append(self.point_pressed)
-            if len(self.points_send) > 2:
-                self.points_send.pop(0)
-            print(self.point_pressed , self.points_send)
-            global province_id
-            draw_to_compute_thread.put((self.tool , (self.points_send , province_id)))
+            if self.tool == "free hand":
+                self.using_tool = True
+                self.point_pressed_to_send(event)
+                global province_id
+                draw_to_compute_thread.put((self.tool , (self.points_send , province_id)))
+        elif event.button() == Qt.RightButton:
+            if self.tool == "erase":
+                self.using_tool = True
+                
     
     def mouseMoveEvent(self , event):
-        if self.using_tool:
-            self.point_pressed = self.mapToScene(event.pos())
-            self.points_send.append(self.point_pressed)
-            if len(self.points_send) > 2:
-                self.points_send.pop(0)
-            print(self.point_pressed , self.points_send)
-            global province_id
-            draw_to_compute_thread.put((self.tool , (self.points_send , province_id)))
+        if self.tool == "free hand":
+            if self.using_tool:
+                self.point_pressed_to_send(event)
+                global province_id
+                draw_to_compute_thread.put((self.tool , (self.points_send , province_id)))
     
     def mouseReleaseEvent(self , event):
-        if event.button() == Qt.LeftButton:
-            self.using_tool = False
+        if self.tool == "free hand":
+            if event.button() == Qt.LeftButton:
+                self.using_tool = False
+        elif self.tool == "erase":
+            if event.button() == Qt.RightButton:
+                self.using_tool = False
     
     def get_size(self):
         return self.width()
@@ -139,6 +176,7 @@ class MyDrawWindow(QGraphicsView):
 class ProvinceSettings(QWidget):
     def __init__(self , size):
         super().__init__()
+        size = int(size / 2)
         self.setFixedWidth(size)
         layout = QVBoxLayout(self)
         self.new_province = QPushButton("new province")
