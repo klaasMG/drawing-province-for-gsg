@@ -16,7 +16,6 @@ compute_to_image_render_thread = queue.Queue()
 province_id = 1
 province_id_max = 1
 
-
 def extract_rgb_divmod(color_24bit):
     # getting a rgb values from the id
     blue = color_24bit % 256
@@ -25,7 +24,6 @@ def extract_rgb_divmod(color_24bit):
     color_24bit //= 256
     red = color_24bit % 256
     return red , green , blue
-
 
 class MainWindow(QMainWindow):
     def __init__(self , map_path):
@@ -65,8 +63,7 @@ class ToolSelectWidget(QWidget):
             tool = btn.text()
             print(tool)
             self.parent.set_tool(tool)
-    
-    
+            self.parent.points_cleer()
 
 class MyDrawWindow(QGraphicsView):
     def __init__(self , map_path):
@@ -122,11 +119,23 @@ class MyDrawWindow(QGraphicsView):
             points = ((1 , 1) , (1 , 1))
         if isinstance(colour , tuple):
             red , green , blue = colour
+            erase_force = 255
+        elif tool == "erase":
+            red, green, blue, erase_force = (0, 0, 0, 0)
         else:
-            red , green , blue = 1 , 1 , 1
+            red , green , blue, erase_force = 1 , 1 , 1, 255
         painter = QPainter(self.drawing_pixmap)
-        painter.setPen(QPen(QColor(red , green , blue) , 1))
+        painter.setPen(QPen(QColor(red , green , blue, erase_force) , 1))
+        painter.setCompositionMode(QPainter.CompositionMode_Source)
         if tool == "free hand":
+            point1 , point2 = points
+            point1_x , point1_y = point1
+            painter.drawPoint(point1_x , point1_y)
+            if point2 is not None:
+                point2_x , point2_y = point2
+                painter.drawLine(point1_x , point1_y , point2_x , point2_y)
+            self.drawing_item.setPixmap(self.drawing_pixmap)
+        elif tool == "erase":
             point1 , point2 = points
             point1_x , point1_y = point1
             painter.drawPoint(point1_x , point1_y)
@@ -142,6 +151,9 @@ class MyDrawWindow(QGraphicsView):
             self.points_send.pop(0)
         print(self.point_pressed , self.points_send)
     
+    def points_cleer(self):
+        self.points_send.clear()
+    
     def mousePressEvent(self , event):
         if event.button() == Qt.LeftButton:
             if self.tool == "free hand":
@@ -152,6 +164,8 @@ class MyDrawWindow(QGraphicsView):
         elif event.button() == Qt.RightButton:
             if self.tool == "erase":
                 self.using_tool = True
+                self.point_pressed_to_send(event)
+                draw_to_compute_thread.put((self.tool, (self.points_send, None)))
                 
     
     def mouseMoveEvent(self , event):
@@ -160,14 +174,20 @@ class MyDrawWindow(QGraphicsView):
                 self.point_pressed_to_send(event)
                 global province_id
                 draw_to_compute_thread.put((self.tool , (self.points_send , province_id)))
+        elif self.tool == "erase":
+            if self.using_tool:
+                self.point_pressed_to_send(event)
+                draw_to_compute_thread.put((self.tool, (self.points_send, None)))
     
     def mouseReleaseEvent(self , event):
         if self.tool == "free hand":
             if event.button() == Qt.LeftButton:
                 self.using_tool = False
+                self.points_send.clear()
         elif self.tool == "erase":
             if event.button() == Qt.RightButton:
                 self.using_tool = False
+                self.points_send.clear()
     
     def get_size(self):
         return self.width()
@@ -240,11 +260,23 @@ class ComputeThread(QObject):
                     self.compute_image = np.zeros((size_aray_y , size_aray_x) , dtype=np.uint32)
                 elif tool == "save":
                     data = None
+                elif tool == "erase":
+                    if len(data) == 2:
+                        points, discard = data
+                        if len(points) == 2:
+                            point1, point2 = points
+                        else:
+                            point1 = points[0]
+                            point2 = None
+                    else:
+                        point1 = None
+                        point2 = None
+                    tool, data = self.erase(tool, point1, point2)
                 compute_to_image_render_thread.put((tool , data))
                 self.compute_to_draw_thread.emit((tool , data))
             except queue.Empty:
                 continue
-    
+                
     def free_hand(self , tool , point1 , point2 , pid):
         if pid is not None or point1 is not None:
             if pid is not None:
@@ -268,6 +300,23 @@ class ComputeThread(QObject):
         else:
             red , green , blue = None , None , None
         return tool , ((point1 , point2) , (red , green , blue))
+    
+    def erase(self, tool, point1, point2):
+        point1_x = int(point1.x())
+        point1_y = int(point1.y())
+        
+        self.compute_image[point1_y , point1_x] = 0
+        
+        if point2 is not None:
+            point2_x = int(point2.x())
+            point2_y = int(point2.y())
+            self.bresenham_octant0(point2_y , point2_x , point1_y , point1_x , 0)
+            point2 = (point2_x , point2_y)
+        else:
+            point2 = None
+        point1 = (point1_x , point1_y)
+        return tool, (point1, point2)
+        
     
     def bresenham_octant0(self , dy , dx , offset_y , offset_x , pid):
         dy = dy - offset_y
@@ -334,10 +383,11 @@ class ComputeThread(QObject):
             y , x = -y , x
         return y , x
 
-
 class Image_draw_thread():
     def __init__(self):
-        self.draw_image = Image.new("RGBA" , (13500 , 6750) , (0 , 0 , 0 , 0))
+        self.map_size_y = 13500
+        self.map_size_x = 6750
+        self.draw_image = Image.new("RGBA" , (self.map_size_y , self.map_size_x) , (0 , 0 , 0 , 0))
     
     def run(self):
         while True:
@@ -350,9 +400,16 @@ class Image_draw_thread():
                 if point2 is not None:
                     draw = ImageDraw.Draw(self.draw_image)
                     draw.line((point1[0] , point1[1] , point2[0] , point2[1]) , fill=(red , green , bleu) , width=1)
+            if tool == "erase":
+                points , colour = data
+                point1 , point2 = points
+                red , green , bleu = (0 , 0, 0)
+                self.draw_image.putpixel(point1 , (red , green , bleu, 0))
+                if point2 is not None:
+                    draw = ImageDraw.Draw(self.draw_image)
+                    draw.line((point1[0] , point1[1] , point2[0] , point2[1]) , fill=(red , green , bleu, 0) , width=1)
             if tool == "save":
                 self.draw_image.save("map_image.png" , format="png")
-
 
 try:
     app = QApplication(sys.argv)
