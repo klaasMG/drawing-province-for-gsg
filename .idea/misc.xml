@@ -3,4 +3,10 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.13 (making it work again because it is dogshit)" />
   </component>
+  <component name="CMakePythonSetting">
+    <option name="pythonIntegrationState" value="YES" />
+  </component>
+  <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$/the drawing">
+    <contentRoot DIR="$PROJECT_DIR$" />
+  </component>
 </project>
