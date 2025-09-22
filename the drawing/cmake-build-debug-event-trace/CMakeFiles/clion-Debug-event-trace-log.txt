@@ -1,0 +1,24 @@
+"C:\Program Files\JetBrains\CLion 2025.1.1\bin\cmake\win\x64\bin\cmake.exe" -DCMAKE_BUILD_TYPE=Debug "-DCMAKE_MAKE_PROGRAM=C:/Program Files/JetBrains/CLion 2025.1.1/bin/ninja/win/x64/ninja.exe" --profiling-format=google-trace --profiling-output=CMakeFiles\clion-event-trace.json -G Ninja -DPython_EXECUTABLE=C:/Users/klaas/AppData/Local/Microsoft/WindowsApps/python3.13.exe -DPython3_EXECUTABLE=C:/Users/klaas/AppData/Local/Microsoft/WindowsApps/python3.13.exe -S "C:\Users\klaas\PycharmProjects\making it work again because it is dogshit 78\the drawing" -B "C:\Users\klaas\PycharmProjects\making it work again because it is dogshit 78\the drawing\cmake-build-debug-event-trace"
+-- The C compiler identification is GNU 13.1.0
+-- The CXX compiler identification is GNU 13.1.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: C:/Program Files/JetBrains/CLion 2025.1.1/bin/mingw/bin/gcc.exe - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: C:/Program Files/JetBrains/CLion 2025.1.1/bin/mingw/bin/g++.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Python3: C:/Users/klaas/AppData/Local/Programs/Python/Python313/libs/python313.lib (found version "3.13.0") found components: Development Development.Module Development.Embed
+-- Configuring done (1.0s)
+-- Generating done (0.0s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    Python3_EXECUTABLE
+    Python_EXECUTABLE
+
+
+-- Build files have been written to: C:/Users/klaas/PycharmProjects/making it work again because it is dogshit 78/the drawing/cmake-build-debug-event-trace

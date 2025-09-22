@@ -9,4 +9,5 @@
   <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$/the drawing">
     <contentRoot DIR="$PROJECT_DIR$" />
   </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.13" project-jdk-type="Python SDK" />
 </project>

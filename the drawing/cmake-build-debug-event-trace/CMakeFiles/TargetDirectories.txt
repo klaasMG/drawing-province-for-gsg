@@ -1,0 +1,3 @@
+C:/Users/klaas/PycharmProjects/making it work again because it is dogshit 78/the drawing/cmake-build-debug-event-trace/CMakeFiles/mijnmodule.dir
+C:/Users/klaas/PycharmProjects/making it work again because it is dogshit 78/the drawing/cmake-build-debug-event-trace/CMakeFiles/edit_cache.dir
+C:/Users/klaas/PycharmProjects/making it work again because it is dogshit 78/the drawing/cmake-build-debug-event-trace/CMakeFiles/rebuild_cache.dir
